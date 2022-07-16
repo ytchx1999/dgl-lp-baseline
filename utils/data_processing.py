@@ -65,7 +65,7 @@ def get_data_no_label(dataset_name, different_new_nodes_between_val_and_test=Fal
     full_data = Data_no_label(sources, destinations, timestamps, edge_idxs)
 
     # create dgl graph
-    g = dgl.graph((sources, destinations))
+    full_g = dgl.graph((sources, destinations))
     # if not os.path.exists('./results'):
     #     os.makedirs('./results', exist_ok=True)
     # dgl.save_graphs('./results/{}_{}_{}_graph.bin'.format(dataset_name, data_type, task_type), [g])
@@ -96,6 +96,9 @@ def get_data_no_label(dataset_name, different_new_nodes_between_val_and_test=Fal
 
     train_data = Data_no_label(sources[train_mask], destinations[train_mask], timestamps[train_mask],
                                edge_idxs[train_mask])
+    
+    # train graph only
+    g = dgl.graph((train_data.sources, train_data.destinations))
 
     # define the new nodes sets for testing inductiveness of the model
     train_node_set = set(train_data.sources).union(train_data.destinations)
@@ -152,7 +155,7 @@ def get_data_no_label(dataset_name, different_new_nodes_between_val_and_test=Fal
     print("{} nodes were used for the inductive testing, i.e. are never seen during training".format(
         len(new_test_node_set)))
 
-    return g, node_features, full_data, train_data, val_data, test_data, \
+    return g, full_g, node_features, full_data, train_data, val_data, test_data, \
            new_node_val_data, new_node_test_data
 
 

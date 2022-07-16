@@ -69,7 +69,7 @@ def main():
 
     args = parser.parse_args()
 
-    g, n_feats, full_data, train_data, val_data, test_data, new_node_val_data, new_node_test_data = get_data_no_label(args.data,
+    g, full_g, n_feats, full_data, train_data, val_data, test_data, new_node_val_data, new_node_test_data = get_data_no_label(args.data,
                               different_new_nodes_between_val_and_test=args.different_new_nodes, randomize_features=args.randomize_features, \
                               have_edge=False, data_type=args.data_type, task_type=args.task_type, mode=args.mode, seed=args.seed)
     
@@ -90,11 +90,14 @@ def main():
     device_string = 'cuda:{}'.format(args.gpu) if torch.cuda.is_available() else 'cpu'
     device = torch.device(device_string)
 
-    g = dgl.to_bidirected(g, copy_ndata=True)
-    g = dgl.add_self_loop(g)
+    # undirected
+    g = dgl.to_bidirected(g)
+    full_g = dgl.to_bidirected(full_g)
+    # g = dgl.add_self_loop(g)
 
     g = g.to(device)
-    train_seed_edges = torch.from_numpy(train_data.edge_idxs).to(device)
+    full_g = full_g.to(device)
+    train_seed_edges = torch.arange(g.num_edges() // 2).to(device)
 
     test_ap_list = []
     test_auc_list = []
@@ -182,7 +185,7 @@ def main():
             if epoch % 5 == 0 or (epoch + 1) == args.n_epoch:
                 model.eval()
                 infer_data = val_data, test_data, new_node_val_data, new_node_test_data, val_rand_sampler, nn_val_rand_sampler, test_rand_sampler, nn_test_rand_sampler
-                val_res, nn_val_res, test_res, nn_test_res = evaluate(g, model, node_features, device, infer_data)
+                val_res, nn_val_res, test_res, nn_test_res = evaluate(full_g, model, node_features, device, infer_data)
                 
                 print('*'*50, flush=True)
                 print('valid ap: {}, new node val ap: {}'.format(val_res['ap'], nn_val_res['ap']), flush=True)

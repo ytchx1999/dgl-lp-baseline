@@ -238,6 +238,7 @@ def main():
     print(f'Final new node test auc: {nn_best_result_auc_mean} ± {nn_best_result_auc_std}', flush=True)
     print(f'Final new node test f1_micro: {nn_best_result_f1_micro_mean} ± {nn_best_result_f1_micro_std}', flush=True)
     print(f'Final new node test f1_macro: {nn_best_result_f1_macro_mean} ± {nn_best_result_f1_macro_std}', flush=True)
+    print('-'*50, flush=True)
     # done !
 
 
@@ -297,7 +298,7 @@ def evaluate(g, model, feat, device, infer_data, num_workers=0):
         val_res = compute_metrics(model, node_emb, val_src, val_dst, val_neg, device)
         nn_val_res = compute_metrics(model, node_emb, nn_val_src, nn_val_dst, nn_val_neg, device)
         test_res = compute_metrics(model, node_emb, test_src, test_dst, test_neg, device)
-        nn_test_res = compute_metrics(model, node_emb, test_src, test_dst, test_neg, device)
+        nn_test_res = compute_metrics(model, node_emb, nn_test_src, nn_test_dst, nn_test_neg, device)
 
     return val_res, nn_val_res, test_res, nn_test_res
 

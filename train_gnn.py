@@ -1,5 +1,6 @@
 import math
 import logging
+from platform import node
 import time
 import sys
 import argparse
@@ -10,60 +11,67 @@ import torch.nn.functional as F
 import numpy as np
 import pickle
 from pathlib import Path
+import random
 
-import torchmetrics.functional as MF
+# import torchmetrics.functional as MF
 import dgl
 import dgl.nn as dglnn
 import time
 import numpy as np
-import tqdm
+from tqdm import tqdm, trange
+import os
 
 # from evaluation.evaluation import eval_edge_prediction
 from model.gnn import SAGE
 from utils.utils import EarlyStopMonitor, RandEdgeSampler, get_neighbor_finder
-from utils.data_processing import get_data, compute_time_statistics, get_data_no_label
+from utils.data_processing import compute_time_statistics, get_data_no_label
 
 from sklearn.metrics import average_precision_score
 from sklearn.metrics import f1_score
 from sklearn.metrics import roc_auc_score
 
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+
+
+def set_seed(seed=0):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    dgl.random.seed(seed)
+    dgl.seed(seed)
+
 
 def main():
     ### Argument and global variables
     parser = argparse.ArgumentParser('Link Prediction')
-    parser.add_argument('-d', '--data', type=str, help='Dataset name (eg. wikipedia or reddit)', default='gowalla')
+    parser.add_argument('-d', '--data', type=str, help='Dataset name', default='gowalla_Entertainment')
     parser.add_argument('--bs', type=int, default=512, help='Batch_size')
-    parser.add_argument('--prefix', type=str, default='', help='Prefix to name the checkpoints')
-    parser.add_argument('--n_degree', type=int, default=10, help='Number of neighbors to sample')
-    parser.add_argument('--n_head', type=int, default=2, help='Number of heads used in attention layer')
-    parser.add_argument('--n_epoch', type=int, default=50, help='Number of epochs')
-    parser.add_argument('--n_layer', type=int, default=1, help='Number of network layers')
+    # parser.add_argument('--n_head', type=int, default=2, help='Number of heads used in attention layer')
+    parser.add_argument('--n_epoch', type=int, default=20, help='Number of epochs')
     parser.add_argument('--lr', type=float, default=0.001, help='Learning rate') #0.0001
-    parser.add_argument('--weight_decay', type=float, default=0.0001, help='weight decay')
-    parser.add_argument('--patience', type=int, default=3, help='Patience for early stopping')
+    parser.add_argument('--weight_decay', type=float, default=5e-4, help='weight decay')
     parser.add_argument('--n_runs', type=int, default=1, help='Number of runs')
-    parser.add_argument('--drop_out', type=float, default=0.1, help='Dropout probability')
     parser.add_argument('--gpu', type=int, default=0, help='Idx for the gpu to use')
-    parser.add_argument('--node_dim', type=int, default=100, help='Dimensions of the node embedding')
-    parser.add_argument('--time_dim', type=int, default=100, help='Dimensions of the time embedding')
-    parser.add_argument('--backprop_every', type=int, default=1, help='Every how many batches to backprop')
     parser.add_argument('--model', type=str, default="graphsage", choices=["graphsage", "gat", "gin"], help='Type of embedding module')
     parser.add_argument('--n_hidden', type=int, default=256, help='Dimensions of the hidden')
     parser.add_argument("--fanout", type=str, default='15,10,5')
     parser.add_argument('--different_new_nodes', action='store_true', help='Whether to use disjoint set of new nodes for train and val')
     parser.add_argument('--uniform', action='store_true', help='take uniform sampling from temporal neighbors')
     parser.add_argument('--randomize_features', action='store_true', help='Whether to randomize node features')
-    parser.add_argument('--use_destination_embedding_in_message', action='store_true', help='Whether to use the embedding of the destination node as part of the message')
-    parser.add_argument('--use_source_embedding_in_message', action='store_true', help='Whether to use the embedding of the source node as part of the message')
-    parser.add_argument('--k_hop', type=int, default=2, help='hops in the sampled subgraph')
     parser.add_argument('--data_type', type=str, default="gowalla", help='Type of dataset')
     parser.add_argument('--task_type', type=str, default="time_trans", help='Type of task')
+    parser.add_argument('--mode', type=str, default="pretrain", help='pretrain or downstream')
+    parser.add_argument('--seed', type=int, default=0, help='Seed for all')
 
     args = parser.parse_args()
 
-    g, node_features, full_data, train_data, val_data, test_data, new_node_val_data, new_node_test_data = get_data_no_label(args.data,
+    g, n_feats, full_data, train_data, val_data, test_data, new_node_val_data, new_node_test_data = get_data_no_label(args.data,
                               different_new_nodes_between_val_and_test=args.different_new_nodes, randomize_features=args.randomize_features, \
-                              have_edge=False, data_type=args.data_type, task_type=args.task_type)
+                              have_edge=False, data_type=args.data_type, task_type=args.task_type, mode=args.mode, seed=args.seed)
     
     train_ngh_finder = get_neighbor_finder(train_data, args.uniform)
 
@@ -74,10 +82,10 @@ def main():
     # across different runs
     # NB: in the inductive setting, negatives are sampled only amongst other new nodes
     train_rand_sampler = RandEdgeSampler(train_data.sources, train_data.destinations)
-    val_rand_sampler = RandEdgeSampler(full_data.sources, full_data.destinations, seed=0)
-    nn_val_rand_sampler = RandEdgeSampler(new_node_val_data.sources, new_node_val_data.destinations, seed=1)
-    test_rand_sampler = RandEdgeSampler(full_data.sources, full_data.destinations, seed=2)
-    nn_test_rand_sampler = RandEdgeSampler(new_node_test_data.sources, new_node_test_data.destinations, seed=3)
+    val_rand_sampler = RandEdgeSampler(full_data.sources, full_data.destinations, seed=args.seed)
+    nn_val_rand_sampler = RandEdgeSampler(new_node_val_data.sources, new_node_val_data.destinations, seed=args.seed)
+    test_rand_sampler = RandEdgeSampler(full_data.sources, full_data.destinations, seed=args.seed)
+    nn_test_rand_sampler = RandEdgeSampler(new_node_test_data.sources, new_node_test_data.destinations, seed=args.seed)
     # Set device
     device_string = 'cuda:{}'.format(args.gpu) if torch.cuda.is_available() else 'cpu'
     device = torch.device(device_string)
@@ -87,7 +95,6 @@ def main():
 
     g = g.to(device)
     train_seed_edges = torch.from_numpy(train_data.edge_idxs).to(device)
-    node_features = torch.nn.Parameter(torch.from_numpy(node_features)).to(device)
 
     test_ap_list = []
     test_auc_list = []
@@ -99,10 +106,23 @@ def main():
     nn_test_f1_macro_list = []
 
     for i in range(args.n_runs):
-        if args.model == 'graphsage':
-            model = SAGE(node_features.shape[1], args.n_hidden).to(device)
+        set_seed(i)
+        print('-'*50, flush=True)
+        print(f'Run {i}:', flush=True)
+
+        if args.mode == 'pretrain':
+            node_features = torch.nn.Parameter(torch.from_numpy(n_feats).to(torch.float32)).to(device)
+        else:
+            node_features = torch.nn.Parameter(torch.load('./results/emb_{}_{}_pretrain.pth'.format(args.data, args.task_type), map_location='cpu')).to(device)
         
-        opt = torch.optim.Adam(model.parameters(), lr=0.001, weight_decay=5e-4)
+        if args.model == 'graphsage':
+            model = SAGE(node_features.shape[1], args.n_hidden)
+            if not (args.mode == 'pretrain'):
+                ckpt = torch.load('./results/model_{}_{}_{}_pretrain.pth'.format(args.model, args.data, args.task_type), map_location='cpu')
+                model.load_state_dict(ckpt, strict=False)
+        
+        model = model.to(device)
+        opt = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
         # criterion = torch.nn.BCELoss()
 
         fanout = [int(i) for i in args.fanout.split(',')]
@@ -124,7 +144,7 @@ def main():
         for epoch in range(args.n_epoch):
             ap, f1, auc, m_loss = [], [], [], []
 
-            for it, (input_nodes, pair_graph, neg_pair_graph, blocks) in enumerate(dataloader):
+            for input_nodes, pair_graph, neg_pair_graph, blocks in tqdm(dataloader, desc=f"Run {i}, Epoch {epoch}"):
                 model.train()
 
                 # x = blocks[0].srcdata['feat']
@@ -132,8 +152,8 @@ def main():
                 pos_score, neg_score = model(pair_graph, neg_pair_graph, blocks, x)
                 pos_label = torch.ones_like(pos_score)
                 neg_label = torch.zeros_like(neg_score)
-                score = torch.cat([pos_score, neg_score])
-                labels = torch.cat([pos_label, neg_label])
+                score = torch.cat([pos_score, neg_score]).squeeze(-1)
+                labels = torch.cat([pos_label, neg_label]).squeeze(-1)
                 loss = F.binary_cross_entropy_with_logits(score, labels)
                 opt.zero_grad()
                 loss.backward()
@@ -141,12 +161,16 @@ def main():
 
                 with torch.no_grad():
                     model = model.eval()
-                    pred_score = np.concatenate([(pos_score.sigmoid()).cpu().detach().numpy(), (neg_score.sigmoid()).cpu().detach().numpy()])
-                    pred_label = pred_score > 0.5
-                    ap.append(average_precision_score(labels.astype(np.float64), pred_score.astype(np.float64)))
-                    f1.append(f1_score(labels.astype(np.float64), pred_label.astype(np.float64)))
-                    auc.append(roc_auc_score(labels.astype(np.float64), pred_score.astype(np.float64)))
+                    # pred_score = np.concatenate([(pos_score.sigmoid()).cpu().detach().numpy(), (neg_score.sigmoid()).cpu().detach().numpy()])
+                    score = score.sigmoid().cpu().detach().numpy()
+                    labels = labels.cpu().detach().numpy()
+                    pred_label = score > 0.5
+                    ap.append(average_precision_score(labels, score))
+                    f1.append(f1_score(labels, pred_label))
+                    auc.append(roc_auc_score(labels, score))
                     m_loss.append(loss.item())
+                
+                # break # only for debug
             
             print('Run {}, epoch: {}'.format(i, epoch))
             print('Epoch mean loss: {}'.format(np.mean(m_loss)))
@@ -155,35 +179,43 @@ def main():
             print('train ap: {}'.format(np.mean(ap)))
 
             # eval
-            if epoch % 10 == 0 or (epoch + 1) == args.n_epoch:
+            if epoch % 5 == 0 or (epoch + 1) == args.n_epoch:
                 model.eval()
                 infer_data = val_data, test_data, new_node_val_data, new_node_test_data, val_rand_sampler, nn_val_rand_sampler, test_rand_sampler, nn_test_rand_sampler
                 val_res, nn_val_res, test_res, nn_test_res = evaluate(g, model, node_features, device, infer_data)
                 
+                print('*'*50, flush=True)
                 print('valid ap: {}, new node val ap: {}'.format(val_res['ap'], nn_val_res['ap']), flush=True)
                 print('valid auc: {}, new node val auc: {}'.format(val_res['auc'], nn_val_res['auc']), flush=True)
                 print('valid f1_micro: {}, new node val f1_micro: {}'.format(val_res['f1_micro'], nn_val_res['f1_micro']), flush=True)
                 print('valid f1_macro: {}, new node val f1_macro: {}'.format(val_res['f1_macro'], nn_val_res['f1_macro']), flush=True)
-
+                print('*'*50, flush=True)
                 print('test ap: {}, new node test ap: {}'.format(test_res['ap'], nn_test_res['ap']), flush=True)
                 print('test auc: {}, new node test auc: {}'.format(test_res['auc'], nn_test_res['auc']), flush=True)
                 print('test f1_micro: {}, new node test f1_micro: {}'.format(test_res['f1_micro'], nn_test_res['f1_micro']), flush=True)
                 print('test f1_macro: {}, new node test f1_macro: {}'.format(test_res['f1_macro'], nn_test_res['f1_macro']), flush=True)
+                print('*'*50, flush=True)
 
                 if best_val_ap < val_res['ap']:
                     best_val_ap = val_res['ap']
                     best_test_result = test_res.copy()
                     best_nn_test_result = nn_test_res.copy()
+                    
+                    if not os.path.exists('./results'):
+                        os.makedirs('./results', exist_ok=True)
+                    if args.mode == 'pretrain':
+                        torch.save(model.state_dict(), './results/model_{}_{}_{}_{}.pth'.format(args.model, args.data, args.task_type, args.mode))
+                        torch.save(node_features.cpu().detach(), './results/emb_{}_{}_{}.pth'.format(args.data, args.task_type, args.mode))
                 
         test_ap_list.append(best_test_result['ap'])
         test_auc_list.append(best_test_result['auc'])
         test_f1_micro_list.append(best_test_result['f1_micro'])
-        test_f1_macro_list.append(best_test_result['f1_micro'])
+        test_f1_macro_list.append(best_test_result['f1_macro'])
 
         nn_test_ap_list.append(best_nn_test_result['ap'])
         nn_test_auc_list.append(best_nn_test_result['auc'])
         nn_test_f1_micro_list.append(best_nn_test_result['f1_micro'])
-        nn_test_f1_macro_list.append(best_nn_test_result['f1_micro'])
+        nn_test_f1_macro_list.append(best_nn_test_result['f1_macro'])
     
     # print final results: mean ± std
     best_result_ap_mean, best_result_ap_std = np.mean(np.array(test_ap_list), axis=0), np.std(np.array(test_ap_list), axis=0)
@@ -206,45 +238,33 @@ def main():
     # done !
 
 
-def compute_mrr(model, node_emb, src, dst, neg_dst, device, batch_size=500):
-    rr = torch.zeros(src.shape[0])
-    for start in tqdm.trange(0, src.shape[0], batch_size):
-        end = min(start + batch_size, src.shape[0])
-        all_dst = torch.cat([dst[start:end, None], neg_dst[start:end]], 1)
-        h_src = node_emb[src[start:end]][:, None, :].to(device)
-        h_dst = node_emb[all_dst.view(-1)].view(*all_dst.shape, -1).to(device)
-        pred = model.predict(h_src, h_dst).squeeze(-1)
-        relevance = torch.zeros(*pred.shape, dtype=torch.bool).to(pred.device)
-        relevance[:, 0] = True
-        rr[start:end] = MF.retrieval_reciprocal_rank(pred, relevance)
-    return rr.mean()
-
-
 def compute_metrics(model, node_emb, src, dst, neg_dst, device, batch_size=500):
     # rr = torch.zeros(src.shape[0])
     ap, auc = [], []
     f1_micro, f1_macro = [], []
-    for start in tqdm.trange(0, src.shape[0], batch_size):
+    for start in trange(0, src.shape[0], batch_size):
         end = min(start + batch_size, src.shape[0])
-        all_dst = torch.cat([dst[start:end, None], neg_dst[start:end]], 1)
-        h_src = node_emb[src[start:end]][:, None, :].to(device)
-        h_dst = node_emb[all_dst.view(-1)].view(*all_dst.shape, -1).to(device)
-        pred = model.predict(h_src, h_dst).squeeze(-1)
-        relevance = torch.zeros(*pred.shape, dtype=torch.bool).to(pred.device)
-        relevance[:, 0] = True
-        # rr[start:end] = MF.retrieval_reciprocal_rank(pred, relevance)
-        pred = pred.numpy()
-        relevance = relevance.numpy()
-        ap.append(average_precision_score(relevance, pred))  # ? .sigmoid() ?
-        auc.append(roc_auc_score(relevance, pred))
-        f1_micro.append(f1_score(relevance, np.where(pred > 0.5, 1, 0), average='micro'))
-        f1_macro.append(f1_score(relevance, np.where(pred > 0.5, 1, 0), average='macro'))
+        h_src = node_emb[src[start:end]].to(device)
+        h_dst = node_emb[dst[start:end]].to(device)
+        h_neg = node_emb[neg_dst[start:end]].to(device)
+
+        pos_prob = model.predict(h_src, h_dst).squeeze(-1)
+        neg_prob = model.predict(h_src, h_neg).squeeze(-1)
+
+        pred_score = np.concatenate([(pos_prob.sigmoid()).cpu().detach().numpy(), (neg_prob.sigmoid()).cpu().detach().numpy()])
+        true_label = np.concatenate([np.ones(h_dst.shape[0]), np.zeros(h_neg.shape[0])])
+
+        ap.append(average_precision_score(true_label, pred_score))
+        auc.append(roc_auc_score(true_label, pred_score))
+        f1_micro.append(f1_score(true_label, np.where(pred_score > 0.5, 1, 0), average='micro'))
+        f1_macro.append(f1_score(true_label, np.where(pred_score > 0.5, 1, 0), average='macro'))
+
     return {'ap': np.mean(ap), 'auc': np.mean(auc), 'f1_micro': np.mean(f1_micro), 'f1_macro': np.mean(f1_macro)}
 
 
 def evaluate(g, model, feat, device, infer_data, num_workers=0):
     with torch.no_grad():
-        node_emb = model.inference(g, feat, device, 4096, num_workers, 'cpu')
+        node_emb = model.inference(g, feat, device, 4096, 'cpu')
         val_data, test_data, new_node_val_data, new_node_test_data, val_rand_sampler, nn_val_rand_sampler, test_rand_sampler, nn_test_rand_sampler = infer_data
 
         val_src, val_dst = val_data.sources, val_data.destinations
@@ -268,18 +288,14 @@ def evaluate(g, model, feat, device, infer_data, num_workers=0):
 
         # test_ap, test_auc, nn_test_ap, nn_test_auc = [], [], [], []
         # test_f1_micro, test_f1_macro, nn_test_f1_micro, nn_test_f1_macro = [], [], [], []
+
+        print('compute metrics...', flush=True)
         
         val_res = compute_metrics(model, node_emb, val_src, val_dst, val_neg, device)
         nn_val_res = compute_metrics(model, node_emb, nn_val_src, nn_val_dst, nn_val_neg, device)
         test_res = compute_metrics(model, node_emb, test_src, test_dst, test_neg, device)
         nn_test_res = compute_metrics(model, node_emb, test_src, test_dst, test_neg, device)
 
-        # results = []
-        # for split in ['valid', 'test']:
-        #     src = edge_split[split]['source_node'].to(node_emb.device)
-        #     dst = edge_split[split]['target_node'].to(node_emb.device)
-        #     neg_dst = edge_split[split]['target_node_neg'].to(node_emb.device)
-        #     results.append(compute_mrr(model, node_emb, src, dst, neg_dst, device))
     return val_res, nn_val_res, test_res, nn_test_res
 
 

@@ -30,7 +30,7 @@ class Data_no_label:
 
 
 def get_data_no_label(dataset_name, different_new_nodes_between_val_and_test=False, randomize_features=False,
-                      have_edge=False, data_type=None, task_type='time_trans'):
+                      have_edge=False, data_type=None, task_type='time_trans', mode='pretrain', seed=0):
     ### Load data and train val test split
     if data_type == None:
         graph_df = pd.read_csv('./processed_data/ml_{}.csv'.format(dataset_name))
@@ -42,14 +42,14 @@ def get_data_no_label(dataset_name, different_new_nodes_between_val_and_test=Fal
             edge_features = None
         node_features = np.load('./processed_data/ml_{}_node.npy'.format(dataset_name))
     else:
-        graph_df = pd.read_csv('./processed_data/{}/{}/ml_{}.csv'.format(data_type, task_type, dataset_name))
+        graph_df = pd.read_csv('./processed_data/{}/{}/ml_{}_{}.csv'.format(data_type, task_type, dataset_name, mode))
         # edge_features = np.load('./processed_data/{}/{}/ml_{}.npy'.format(data_type, task_type, dataset_name))
-        node_features = np.load('./processed_data/{}/{}/ml_{}_node.npy'.format(data_type, task_type, dataset_name))
+        node_features = np.load('./processed_data/{}/{}/ml_{}_{}_node.npy'.format(data_type, task_type, dataset_name, mode))
         if have_edge:
-            edge_features = np.load('./processed_data/{}/{}/ml_{}.npy'.format(data_type, task_type, dataset_name))
+            edge_features = np.load('./processed_data/{}/{}/ml_{}_{}.npy'.format(data_type, task_type, dataset_name, mode))
         else:
             edge_features = None
-        node_features = np.load('./processed_data/{}/{}/ml_{}_node.npy'.format(data_type, task_type, dataset_name))
+        # node_features = np.load('./processed_data/{}/{}/ml_{}_{}_node.npy'.format(data_type, task_type, dataset_name, mode))
 
     if randomize_features:
         node_features = np.random.rand(node_features.shape[0], node_features.shape[1])
@@ -70,7 +70,7 @@ def get_data_no_label(dataset_name, different_new_nodes_between_val_and_test=Fal
     #     os.makedirs('./results', exist_ok=True)
     # dgl.save_graphs('./results/{}_{}_{}_graph.bin'.format(dataset_name, data_type, task_type), [g])
 
-    random.seed(2020)
+    random.seed(seed)
 
     node_set = set(sources) | set(destinations)
     n_total_unique_nodes = len(node_set)
@@ -152,7 +152,7 @@ def get_data_no_label(dataset_name, different_new_nodes_between_val_and_test=Fal
     print("{} nodes were used for the inductive testing, i.e. are never seen during training".format(
         len(new_test_node_set)))
 
-    return g, node_features, edge_features, full_data, train_data, val_data, test_data, \
+    return g, node_features, full_data, train_data, val_data, test_data, \
            new_node_val_data, new_node_test_data
 
 

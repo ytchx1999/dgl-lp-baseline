@@ -2,7 +2,7 @@ import argparse
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torchmetrics.functional as MF
+# import torchmetrics.functional as MF
 import dgl
 import dgl.nn as dglnn
 import time
@@ -44,6 +44,7 @@ class SAGE(nn.Module):
         # The difference between this inference function and the one in the official
         # example is that the intermediate results can also benefit from prefetching.
         # feat = g.ndata['feat']
+        print('Infecrence...', flush=True)
         sampler = dgl.dataloading.MultiLayerFullNeighborSampler(1) # prefetch_node_feats=['feat']
         dataloader = dgl.dataloading.DataLoader(
                 g, torch.arange(g.num_nodes()).to(g.device), sampler, device=device,

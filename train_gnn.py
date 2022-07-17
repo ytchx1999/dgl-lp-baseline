@@ -68,6 +68,7 @@ def main():
     parser.add_argument('--seed', type=int, default=0, help='Seed for all')
 
     args = parser.parse_args()
+    set_seed(args.seed)
 
     g, full_g, n_feats, full_data, train_data, val_data, test_data, new_node_val_data, new_node_test_data = get_data_no_label(args.data,
                               different_new_nodes_between_val_and_test=args.different_new_nodes, randomize_features=args.randomize_features, \
@@ -185,7 +186,7 @@ def main():
             if epoch % 5 == 0 or (epoch + 1) == args.n_epoch:
                 model.eval()
                 infer_data = val_data, test_data, new_node_val_data, new_node_test_data, val_rand_sampler, nn_val_rand_sampler, test_rand_sampler, nn_test_rand_sampler
-                val_res, nn_val_res, test_res, nn_test_res = evaluate(full_g, model, node_features, device, infer_data)
+                val_res, nn_val_res, test_res, nn_test_res = evaluate(g, full_g.num_nodes(), model, node_features, device, infer_data)  # full_g  or g? 
                 
                 print('*'*50, flush=True)
                 print('valid ap: {}, new node val ap: {}'.format(val_res['ap'], nn_val_res['ap']), flush=True)
@@ -266,9 +267,9 @@ def compute_metrics(model, node_emb, src, dst, neg_dst, device, batch_size=500):
     return {'ap': np.mean(ap), 'auc': np.mean(auc), 'f1_micro': np.mean(f1_micro), 'f1_macro': np.mean(f1_macro)}
 
 
-def evaluate(g, model, feat, device, infer_data, num_workers=0):
+def evaluate(g, total_nodes, model, feat, device, infer_data, num_workers=0):
     with torch.no_grad():
-        node_emb = model.inference(g, feat, device, 4096, 'cpu')
+        node_emb = model.inference(g, total_nodes, feat, device, 4096, 'cpu')
         val_data, test_data, new_node_val_data, new_node_test_data, val_rand_sampler, nn_val_rand_sampler, test_rand_sampler, nn_test_rand_sampler = infer_data
 
         val_src, val_dst = val_data.sources, val_data.destinations

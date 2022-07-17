@@ -40,7 +40,7 @@ class SAGE(nn.Module):
         h_neg = self.predict(h[neg_src], h[neg_dst])
         return h_pos, h_neg
 
-    def inference(self, g, feat, device, batch_size, buffer_device=None):
+    def inference(self, g, total_nodes, feat, device, batch_size, buffer_device=None):
         # The difference between this inference function and the one in the official
         # example is that the intermediate results can also benefit from prefetching.
         # feat = g.ndata['feat']
@@ -52,12 +52,10 @@ class SAGE(nn.Module):
         if buffer_device is None:
             buffer_device = device
 
-        total_nodes = feat.shape[0]
-
         for l, layer in enumerate(self.layers):
             # g.num_nodes()  total_nodes
-            y = torch.zeros(g.num_nodes(), self.n_hidden, device=buffer_device) # pin_memory=args.pure_gpu
-            feat = feat.to(device)
+            y = torch.zeros(total_nodes, self.n_hidden, device=buffer_device) # pin_memory=args.pure_gpu
+            feat = feat.detach().clone().to(device)
 
             for input_nodes, output_nodes, blocks in tqdm.tqdm(dataloader):
                 x = feat[input_nodes]

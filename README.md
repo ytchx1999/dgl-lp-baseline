@@ -36,7 +36,17 @@ tqdm
 ```bash
 cd scripts/
 # pretrain + gowalla_Entertainment + time transfer: model GraphSAGE
-bash pretrain_gowalla_env_time_sage.sh
+bash pretrain_gowalla_enter_time_sage.sh
 # downstream + gowalla_Entertainment + time transfer: model GraphSAGE
-bash downstream_gowalla_env_time_sage.sh
+bash downstream_gowalla_enter_time_sage.sh
+
+# pretrain + amazon_beauty + time transfer: model GraphSAGE
+bash pretrain_amazon_beauty_time_sage.sh
+# downstream + amazon_beauty + time transfer: model GraphSAGE
+bash downstream_amazon_beauty_time_sage.sh
+
+# pretrain + amazon_beauty + time transfer: model VGAE
+bash pretrain_amazon_beauty_time_vgae.sh
+# downstream + amazon_beauty + time transfer: model VGAE
+bash downstream_amazon_beauty_time_vgae.sh
 ```

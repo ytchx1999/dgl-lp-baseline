@@ -1,5 +1,79 @@
 import numpy as np
 import torch
+import dgl
+
+
+def mask_test_edges_dgl(graph, num_train, num_val):
+    src, dst = graph.edges()
+    edges_all = torch.stack([src, dst], dim=0)
+    edges_all = edges_all.t().cpu().numpy()
+    num_nodes = graph.num_nodes()
+    # num_test = int(np.floor(edges_all.shape[0] / 10.))
+    # num_val = int(np.floor(edges_all.shape[0] / 20.))
+
+    all_edge_idx = list(range(edges_all.shape[0]))
+    train_edge_idx = all_edge_idx[: num_train]
+    # np.random.shuffle(all_edge_idx)
+    # val_edge_idx = all_edge_idx[:num_val]
+    # test_edge_idx = all_edge_idx[num_val:(num_val + num_test)]
+    # train_edge_idx = all_edge_idx[(num_val + num_test):]
+
+    # test_edges = edges_all[test_edge_idx]
+    # val_edges = edges_all[val_edge_idx]
+    # train_edges = np.delete(edges_all, np.hstack([test_edge_idx, val_edge_idx]), axis=0)
+
+    train_edges = edges_all[: num_train]
+    val_edges = edges_all[num_train : (num_train+num_val)]
+    test_edges = edges_all[(num_train+num_val) :]
+
+    def ismember(a, b, tol=5):
+        rows_close = np.all(np.round(a - b[:, None], tol) == 0, axis=-1)
+        return np.any(rows_close)
+
+    test_edges_false = []
+    while len(test_edges_false) < len(test_edges):
+        idx_i = np.random.randint(0, num_nodes)
+        idx_j = np.random.randint(0, num_nodes)
+        if idx_i == idx_j:
+            continue
+        if ismember([idx_i, idx_j], edges_all):
+            continue
+        if test_edges_false:
+            if ismember([idx_j, idx_i], np.array(test_edges_false)):
+                continue
+            if ismember([idx_i, idx_j], np.array(test_edges_false)):
+                continue
+        test_edges_false.append([idx_i, idx_j])
+
+    val_edges_false = []
+    while len(val_edges_false) < len(val_edges):
+        idx_i = np.random.randint(0, num_nodes)
+        idx_j = np.random.randint(0, num_nodes)
+        if idx_i == idx_j:
+            continue
+        if ismember([idx_i, idx_j], train_edges):
+            continue
+        if ismember([idx_j, idx_i], train_edges):
+            continue
+        if ismember([idx_i, idx_j], val_edges):
+            continue
+        if ismember([idx_j, idx_i], val_edges):
+            continue
+        if val_edges_false:
+            if ismember([idx_j, idx_i], np.array(val_edges_false)):
+                continue
+            if ismember([idx_i, idx_j], np.array(val_edges_false)):
+                continue
+        val_edges_false.append([idx_i, idx_j])
+
+    assert ~ismember(test_edges_false, edges_all)
+    assert ~ismember(val_edges_false, edges_all)
+    assert ~ismember(val_edges, train_edges)
+    assert ~ismember(test_edges, train_edges)
+    assert ~ismember(val_edges, test_edges)
+
+    # NOTE: these edge lists only contain single direction of edge!
+    return train_edge_idx, val_edges, val_edges_false, test_edges, test_edges_false
 
 
 class MergeLayer(torch.nn.Module):

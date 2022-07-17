@@ -141,6 +141,7 @@ def main():
         opt = torch.optim.Adam(model.parameters(), lr=args.lr)
         
         best_val_ap = 0.
+        best_test_ap = 0.
         best_test_result = None
         best_nn_test_result = None
 

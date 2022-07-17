@@ -1,6 +1,7 @@
 import numpy as np
 import torch
 import dgl
+from tqdm import tqdm
 
 
 def mask_test_edges_dgl(graph, num_train, num_val):
@@ -31,7 +32,9 @@ def mask_test_edges_dgl(graph, num_train, num_val):
         return np.any(rows_close)
 
     test_edges_false = []
-    while len(test_edges_false) < len(test_edges):
+    num_test_edges = len(test_edges)
+    pbar = tqdm(total=num_test_edges, desc='mask test edges')
+    while len(test_edges_false) < num_test_edges:
         idx_i = np.random.randint(0, num_nodes)
         idx_j = np.random.randint(0, num_nodes)
         if idx_i == idx_j:
@@ -44,8 +47,12 @@ def mask_test_edges_dgl(graph, num_train, num_val):
             if ismember([idx_i, idx_j], np.array(test_edges_false)):
                 continue
         test_edges_false.append([idx_i, idx_j])
+        pbar.update(1)
+    pbar.close()
 
     val_edges_false = []
+    num_val_edges = len(val_edges)
+    pbar = tqdm(total=num_val_edges, desc='mask val edges')
     while len(val_edges_false) < len(val_edges):
         idx_i = np.random.randint(0, num_nodes)
         idx_j = np.random.randint(0, num_nodes)
@@ -65,14 +72,17 @@ def mask_test_edges_dgl(graph, num_train, num_val):
             if ismember([idx_i, idx_j], np.array(val_edges_false)):
                 continue
         val_edges_false.append([idx_i, idx_j])
+        pbar.update(1)
+    pbar.close()
 
-    assert ~ismember(test_edges_false, edges_all)
-    assert ~ismember(val_edges_false, edges_all)
-    assert ~ismember(val_edges, train_edges)
-    assert ~ismember(test_edges, train_edges)
-    assert ~ismember(val_edges, test_edges)
+    # assert ~ismember(test_edges_false, edges_all)
+    # assert ~ismember(val_edges_false, edges_all)
+    # assert ~ismember(val_edges, train_edges)
+    # assert ~ismember(test_edges, train_edges)
+    # assert ~ismember(val_edges, test_edges)
 
     # NOTE: these edge lists only contain single direction of edge!
+    print('mask done!')
     return train_edge_idx, val_edges, val_edges_false, test_edges, test_edges_false
 
 

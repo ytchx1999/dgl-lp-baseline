@@ -97,7 +97,7 @@ def main():
 
     g = g.to(device)
     full_g = full_g.to(device)
-    train_seed_edges = torch.arange(g.num_edges() // 2).to(device)
+    train_seed_edges = torch.arange(g.num_edges()).to(device)
 
     test_ap_list = []
     test_auc_list = []

@@ -22,7 +22,7 @@ from tqdm import tqdm, trange
 import os
 
 # from evaluation.evaluation import eval_edge_prediction
-from model.gnn import SAGE
+from model.gnn import SAGE, SGC, GCN, GAT, GIN
 from utils.utils import EarlyStopMonitor, RandEdgeSampler, get_neighbor_finder
 from utils.data_processing import compute_time_statistics, get_data_no_label
 
@@ -50,15 +50,17 @@ def main():
     parser = argparse.ArgumentParser('Link Prediction')
     parser.add_argument('-d', '--data', type=str, help='Dataset name', default='gowalla_Entertainment')
     parser.add_argument('--bs', type=int, default=512, help='Batch_size')
-    parser.add_argument('--n_head', type=int, default=2, help='Number of heads used in attention layer')
+    parser.add_argument('--n_heads', type=int, default=3, help='Number of heads used in attention layer')
     parser.add_argument('--n_epoch', type=int, default=20, help='Number of epochs')
     parser.add_argument('--lr', type=float, default=0.001, help='Learning rate') #0.0001
+    parser.add_argument('--drop', type=float, default=0.5, help='Dropout')
     parser.add_argument('--weight_decay', type=float, default=5e-4, help='weight decay')
     parser.add_argument('--n_runs', type=int, default=1, help='Number of runs')
     parser.add_argument('--gpu', type=int, default=0, help='Idx for the gpu to use')
-    parser.add_argument('--model', type=str, default="graphsage", choices=["graphsage", "gat", "gin"], help='Type of embedding module')
+    parser.add_argument('--model', type=str, default="graphsage", choices=["graphsage", "sgc", "gcn", "gin", "gat"], help='Type of embedding module')
     parser.add_argument('--n_hidden', type=int, default=256, help='Dimensions of the hidden')
     parser.add_argument("--fanout", type=str, default='15,10,5', help='Neighbor sampling fanout')
+    # parser.add_argument("--fanout_sgc", type=str, default='0', help='SGC neighbor sampling fanout')
     parser.add_argument('--different_new_nodes', action='store_true', help='Whether to use disjoint set of new nodes for train and val')
     parser.add_argument('--uniform', action='store_true', help='take uniform sampling from temporal neighbors')
     parser.add_argument('--randomize_features', action='store_true', help='Whether to randomize node features')
@@ -66,6 +68,9 @@ def main():
     parser.add_argument('--task_type', type=str, default="time_trans", help='Type of task')
     parser.add_argument('--mode', type=str, default="pretrain", help='pretrain or downstream')
     parser.add_argument('--seed', type=int, default=0, help='Seed for all')
+    # parser.add_argument('--k_hop', type=int, default=3, help='K-hop for SGC')
+    parser.add_argument('--learn_eps', action="store_true", help='learn the epsilon weighting')
+    parser.add_argument('--aggr_type', type=str, default="mean", choices=["sum", "mean", "max"], help='type of neighboring pooling: sum, mean or max')
 
     args = parser.parse_args()
     set_seed(args.seed)
@@ -94,11 +99,14 @@ def main():
     # undirected
     g = dgl.to_bidirected(g)
     full_g = dgl.to_bidirected(full_g)
-    # g = dgl.add_self_loop(g)
+    num_edges_no_self = g.num_edges()
+
+    if args.model in ['gcn', 'gat']:
+        g = dgl.add_self_loop(g)
 
     g = g.to(device)
     full_g = full_g.to(device)
-    train_seed_edges = torch.arange(g.num_edges()).to(device)
+    train_seed_edges = torch.arange(num_edges_no_self).to(device)
 
     test_ap_list = []
     test_auc_list = []
@@ -119,17 +127,32 @@ def main():
         else:
             node_features = torch.nn.Parameter(torch.load('./results/emb_{}_{}_pretrain.pth'.format(args.data, args.task_type), map_location='cpu')).to(device)
         
+        fanout = [int(i) for i in args.fanout.split(',')]
+        n_layers = len(fanout)
+
         if args.model == 'graphsage':
-            model = SAGE(node_features.shape[1], args.n_hidden)
-            if not (args.mode == 'pretrain'):
-                ckpt = torch.load('./results/model_{}_{}_{}_pretrain.pth'.format(args.model, args.data, args.task_type), map_location='cpu')
-                model.load_state_dict(ckpt, strict=False)
+            model = SAGE(node_features.shape[1], args.n_hidden, n_layers, args.drop)
+        elif args.model == 'gcn':
+            model = GCN(node_features.shape[1], args.n_hidden, n_layers, args.drop)
+        elif args.model == 'gat':
+            model = GAT(node_features.shape[1], args.n_hidden, args.n_heads, n_layers, args.drop)
+        elif args.model == 'gin':
+            model = GIN(node_features.shape[1], args.n_hidden, n_layers, args.drop, args.aggr_type, args.learn_eps)
+        # elif args.model == 'sgc':
+        #     model = SGC(node_features.shape[1], args.n_hidden, args.k_hop)
+
+        if not (args.mode == 'pretrain'):
+            ckpt = torch.load('./results/model_{}_{}_{}_pretrain.pth'.format(args.model, args.data, args.task_type), map_location='cpu')
+            model.load_state_dict(ckpt, strict=False)
         
         model = model.to(device)
         opt = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
         # criterion = torch.nn.BCELoss()
 
-        fanout = [int(i) for i in args.fanout.split(',')]
+        # fanout_sgc = [int(i) for i in args.fanout_sgc.split(',')]
+        # if args.model == 'sgc':
+        #     sampler = dgl.dataloading.NeighborSampler(fanout_sgc)
+        # else:
         sampler = dgl.dataloading.NeighborSampler(fanout)  # , prefetch_node_feats=['feat']  [15, 10, 5]
         sampler = dgl.dataloading.as_edge_prediction_sampler(
                 sampler, 
@@ -239,6 +262,7 @@ def main():
     print(f'Final new node test auc: {nn_best_result_auc_mean} ± {nn_best_result_auc_std}', flush=True)
     print(f'Final new node test f1_micro: {nn_best_result_f1_micro_mean} ± {nn_best_result_f1_micro_std}', flush=True)
     print(f'Final new node test f1_macro: {nn_best_result_f1_macro_mean} ± {nn_best_result_f1_macro_std}', flush=True)
+    print(f'Model {args.model}.')
     print('-'*50, flush=True)
     # done !
 

@@ -1,6 +1,6 @@
 cd "$(dirname $0)"
 
-python3 ../train_vgae.py \
+python3 ../../train_vgae.py \
 -d amazon_beauty \
 --bs 512 \
 --n_epoch 10 \

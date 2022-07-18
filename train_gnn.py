@@ -50,7 +50,7 @@ def main():
     parser = argparse.ArgumentParser('Link Prediction')
     parser.add_argument('-d', '--data', type=str, help='Dataset name', default='gowalla_Entertainment')
     parser.add_argument('--bs', type=int, default=512, help='Batch_size')
-    # parser.add_argument('--n_head', type=int, default=2, help='Number of heads used in attention layer')
+    parser.add_argument('--n_head', type=int, default=2, help='Number of heads used in attention layer')
     parser.add_argument('--n_epoch', type=int, default=20, help='Number of epochs')
     parser.add_argument('--lr', type=float, default=0.001, help='Learning rate') #0.0001
     parser.add_argument('--weight_decay', type=float, default=5e-4, help='weight decay')
@@ -58,7 +58,7 @@ def main():
     parser.add_argument('--gpu', type=int, default=0, help='Idx for the gpu to use')
     parser.add_argument('--model', type=str, default="graphsage", choices=["graphsage", "gat", "gin"], help='Type of embedding module')
     parser.add_argument('--n_hidden', type=int, default=256, help='Dimensions of the hidden')
-    parser.add_argument("--fanout", type=str, default='15,10,5')
+    parser.add_argument("--fanout", type=str, default='15,10,5', help='Neighbor sampling fanout')
     parser.add_argument('--different_new_nodes', action='store_true', help='Whether to use disjoint set of new nodes for train and val')
     parser.add_argument('--uniform', action='store_true', help='take uniform sampling from temporal neighbors')
     parser.add_argument('--randomize_features', action='store_true', help='Whether to randomize node features')

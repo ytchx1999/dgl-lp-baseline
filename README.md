@@ -100,3 +100,23 @@ bash downstream_gowalla_entertainment_time_field_sage.sh
 bash downstream_gowalla_food_time_field_sage.sh
 bash downstream_gowalla_shopping_time_field_sage.sh
 ```
+
+## Args
+
+```bash
+  -d, --data     Dataset name
+  --bs           Batch_size
+  --n_head       Number of heads used in attention layer
+  --n_epoch      Number of epochs
+  --lr           Learning rate
+  --weight_decay weight decay
+  --n_runs       Number of runs
+  --gpu          Idx for the gpu to use
+  --model        {graphsage,gat,gin} Type of embedding module
+  --n_hidden     Dimensions of the hidden
+  --fanout       Neighbor sampling fanout
+  --data_type    Type of dataset
+  --task_type    Type of task
+  --mode         pretrain or downstream
+  --seed         Seed for all
+```

@@ -22,7 +22,7 @@ from tqdm import tqdm, trange
 import os
 
 # from evaluation.evaluation import eval_edge_prediction
-from model.gnn import SAGE, SGC, GCN, GAT, GIN
+from model.gnn import SAGE, GCN, GAT, GIN
 from utils.utils import EarlyStopMonitor, RandEdgeSampler, get_neighbor_finder
 from utils.data_processing import compute_time_statistics, get_data_no_label
 
@@ -50,7 +50,7 @@ def main():
     parser = argparse.ArgumentParser('Link Prediction')
     parser.add_argument('-d', '--data', type=str, help='Dataset name', default='gowalla_Entertainment')
     parser.add_argument('--bs', type=int, default=512, help='Batch_size')
-    parser.add_argument('--n_heads', type=int, default=3, help='Number of heads used in attention layer')
+    parser.add_argument('--n_heads', type=int, default=2, help='Number of heads used in attention layer')
     parser.add_argument('--n_epoch', type=int, default=20, help='Number of epochs')
     parser.add_argument('--lr', type=float, default=0.001, help='Learning rate') #0.0001
     parser.add_argument('--drop', type=float, default=0.5, help='Dropout')

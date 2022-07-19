@@ -6,9 +6,10 @@ python3 ../../train_gnn.py \
 --n_epoch 10 \
 --lr 0.001 \
 --n_runs 1 \
---gpu 2 \
---model graphsage \
+--gpu 0 \
+--model gat \
 --n_hidden 256 \
+--n_heads 2 \
 --fanout 15,10,5 \
 --data_type gowalla \
 --task_type time_trans \

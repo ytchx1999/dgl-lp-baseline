@@ -1,7 +1,7 @@
 cd "$(dirname $0)"
 
 python3 ../../train_gnn.py \
--d gowalla_Food \
+-d gowalla_Outdoors \
 --bs 512 \
 --n_epoch 10 \
 --lr 0.001 \

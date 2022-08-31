@@ -8,6 +8,7 @@ import dgl.nn as dglnn
 import time
 import numpy as np
 import tqdm
+import math
 
 
 class GCN(nn.Module):
@@ -55,7 +56,7 @@ class GCN(nn.Module):
         # The difference between this inference function and the one in the official
         # example is that the intermediate results can also benefit from prefetching.
         # feat = g.ndata['feat']
-        print('Infecrence...', flush=True)
+        print('Inference...', flush=True)
         sampler = dgl.dataloading.MultiLayerFullNeighborSampler(1) # prefetch_node_feats=['feat']
         dataloader = dgl.dataloading.DataLoader(
                 g, torch.arange(g.num_nodes()).to(g.device), sampler, device=device,
@@ -124,7 +125,7 @@ class SAGE(nn.Module):
         # The difference between this inference function and the one in the official
         # example is that the intermediate results can also benefit from prefetching.
         # feat = g.ndata['feat']
-        print('Infecrence...', flush=True)
+        print('Inference...', flush=True)
         sampler = dgl.dataloading.MultiLayerFullNeighborSampler(1) # prefetch_node_feats=['feat']
         dataloader = dgl.dataloading.DataLoader(
                 g, torch.arange(g.num_nodes()).to(g.device), sampler, device=device,
@@ -142,6 +143,121 @@ class SAGE(nn.Module):
                 h = layer(blocks[0], x)
                 if l != len(self.layers) - 1:
                     h = self.bns[l](h)
+                    h = F.relu(h)
+                y[output_nodes] = h.to(buffer_device)
+            feat = y
+        return y
+
+
+class DGIConv(nn.Module):
+    def __init__(self, in_feats, n_hidden, n_layers=3, dropout=0.5):
+        super().__init__()
+        self.n_hidden = n_hidden
+        self.n_layers = n_layers
+        self.dropout = nn.Dropout(dropout)
+        self.layers = nn.ModuleList()
+        self.bns = nn.ModuleList()
+
+        self.layers.append(dglnn.SAGEConv(in_feats, n_hidden, 'mean'))
+        self.bns.append(nn.BatchNorm1d(self.n_hidden))
+
+        for l in range(1, self.n_layers - 1):
+            self.layers.append(dglnn.SAGEConv(n_hidden, n_hidden, 'mean'))
+            self.bns.append(nn.BatchNorm1d(self.n_hidden))
+
+        self.layers.append(dglnn.SAGEConv(n_hidden, n_hidden, 'mean'))
+        self.predictor = nn.Sequential(
+            nn.Linear(n_hidden, n_hidden),
+            nn.ReLU(),
+            nn.Linear(n_hidden, n_hidden),
+            nn.ReLU(),
+            nn.Linear(n_hidden, 1))
+
+    def predict(self, h_src, h_dst):
+        return self.predictor(h_src * h_dst)
+
+    def forward(self, blocks, x):
+        h = x
+        for l, (layer, block) in enumerate(zip(self.layers, blocks)):
+            h = layer(block, h)
+            if l != len(self.layers) - 1:
+                h = self.bns[l](h)
+                h = F.relu(h)
+                h = self.dropout(h)
+        return h
+
+
+class Discriminator(nn.Module):
+    def __init__(self, n_hidden):
+        super(Discriminator, self).__init__()
+        self.weight = nn.Parameter(torch.Tensor(n_hidden, n_hidden))
+        self.reset_parameters()
+
+    def uniform(self, size, tensor):
+        bound = 1.0 / math.sqrt(size)
+        if tensor is not None:
+            tensor.data.uniform_(-bound, bound)
+
+    def reset_parameters(self):
+        size = self.weight.size(0)
+        self.uniform(size, self.weight)
+
+    def forward(self, features, summary):
+        features = torch.matmul(features, torch.matmul(self.weight, summary))
+        return features
+
+
+class DGI(torch.nn.Module):
+    def __init__(self, input_dim, hidden_dim, n_layers=3, dropout=0.5):
+        super(DGI, self).__init__()
+        self.encoder = DGIConv(input_dim, hidden_dim, n_layers, dropout)
+        self.discriminator = Discriminator(hidden_dim)
+        self.loss = nn.BCEWithLogitsLoss()
+
+    @staticmethod
+    def corruption(blocks, x):
+        return blocks, x[torch.randperm(x.size(0))]
+
+    def forward(self, pair_graph, neg_pair_graph, blocks, x):
+        positive = self.encoder(blocks, x)
+        negative = self.encoder(*self.corruption(blocks, x))
+
+        summary = torch.sigmoid(positive.mean(dim=0))
+        pos = self.discriminator(positive, summary)
+        neg = self.discriminator(negative, summary)
+
+        l1 = self.loss(pos, torch.ones_like(pos))
+        l2 = self.loss(neg, torch.zeros_like(neg))
+
+        pos_src, pos_dst = pair_graph.edges()
+        neg_src, neg_dst = neg_pair_graph.edges()
+        h_pos = self.encoder.predict(positive[pos_src], positive[pos_dst])
+        h_neg = self.encoder.predict(positive[neg_src], positive[neg_dst])
+        
+        return h_pos, h_neg, (l1 + l2)
+    
+    def inference(self, g, total_nodes, feat, device, batch_size, buffer_device=None):
+        # The difference between this inference function and the one in the official
+        # example is that the intermediate results can also benefit from prefetching.
+        # feat = g.ndata['feat']
+        print('Inference...', flush=True)
+        sampler = dgl.dataloading.MultiLayerFullNeighborSampler(1) # prefetch_node_feats=['feat']
+        dataloader = dgl.dataloading.DataLoader(
+                g, torch.arange(g.num_nodes()).to(g.device), sampler, device=device,
+                batch_size=1000, shuffle=False, drop_last=False, num_workers=0)
+        if buffer_device is None:
+            buffer_device = device
+
+        for l, layer in enumerate(self.encoder.layers):
+            # g.num_nodes()  total_nodes
+            y = torch.zeros(total_nodes, self.encoder.n_hidden, device=buffer_device) # pin_memory=args.pure_gpu
+            feat = feat.detach().clone().to(device)
+
+            for input_nodes, output_nodes, blocks in tqdm.tqdm(dataloader):
+                x = feat[input_nodes]
+                h = layer(blocks[0], x)
+                if l != len(self.encoder.layers) - 1:
+                    h = self.encoder.bns[l](h)
                     h = F.relu(h)
                 y[output_nodes] = h.to(buffer_device)
             feat = y
@@ -194,7 +310,7 @@ class GAT(nn.Module):
         # The difference between this inference function and the one in the official
         # example is that the intermediate results can also benefit from prefetching.
         # feat = g.ndata['feat']
-        print('Infecrence...', flush=True)
+        print('Inference...', flush=True)
         sampler = dgl.dataloading.MultiLayerFullNeighborSampler(1) # prefetch_node_feats=['feat']
         dataloader = dgl.dataloading.DataLoader(
                 g, torch.arange(g.num_nodes()).to(g.device), sampler, device=device,
@@ -270,7 +386,7 @@ class GIN(nn.Module):
         # The difference between this inference function and the one in the official
         # example is that the intermediate results can also benefit from prefetching.
         # feat = g.ndata['feat']
-        print('Infecrence...', flush=True)
+        print('Inference...', flush=True)
         sampler = dgl.dataloading.MultiLayerFullNeighborSampler(1) # prefetch_node_feats=['feat']
         dataloader = dgl.dataloading.DataLoader(
                 g, torch.arange(g.num_nodes()).to(g.device), sampler, device=device,
@@ -395,7 +511,7 @@ class SGC(nn.Module):
         # The difference between this inference function and the one in the official
         # example is that the intermediate results can also benefit from prefetching.
         # feat = g.ndata['feat']
-        print('Infecrence...', flush=True)
+        print('Inference...', flush=True)
         sampler = dgl.dataloading.MultiLayerFullNeighborSampler(1) # prefetch_node_feats=['feat']
         dataloader = dgl.dataloading.DataLoader(
                 g, torch.arange(g.num_nodes()).to(g.device), sampler, device=device,

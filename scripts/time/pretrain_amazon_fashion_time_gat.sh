@@ -6,7 +6,7 @@ python3 ../../train_gnn.py \
 --n_epoch 20 \
 --lr 0.001 \
 --n_runs 1 \
---gpu 2 \
+--gpu 3 \
 --model gat \
 --n_hidden 256 \
 --n_heads 2 \

@@ -12,6 +12,6 @@ python3 ../../train_gnn.py \
 --n_heads 2 \
 --fanout 15,10,5 \
 --data_type gowalla \
---task_type time_trans \
+--task_type tf_trans \
 --mode pretrain \
 --seed 0

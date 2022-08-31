@@ -22,7 +22,7 @@ from tqdm import tqdm, trange
 import os
 
 # from evaluation.evaluation import eval_edge_prediction
-from model.gnn import SAGE, GCN, GAT, GIN
+from model.gnn import SAGE, GCN, GAT, GIN, DGI
 from utils.utils import EarlyStopMonitor, RandEdgeSampler, get_neighbor_finder
 from utils.data_processing import compute_time_statistics, get_data_no_label
 
@@ -57,7 +57,7 @@ def main():
     parser.add_argument('--weight_decay', type=float, default=5e-4, help='weight decay')
     parser.add_argument('--n_runs', type=int, default=1, help='Number of runs')
     parser.add_argument('--gpu', type=int, default=0, help='Idx for the gpu to use')
-    parser.add_argument('--model', type=str, default="graphsage", choices=["graphsage", "sgc", "gcn", "gin", "gat"], help='Type of embedding module')
+    parser.add_argument('--model', type=str, default="graphsage", choices=["graphsage", "sgc", "gcn", "gin", "gat", "dgi"], help='Type of embedding module')
     parser.add_argument('--n_hidden', type=int, default=256, help='Dimensions of the hidden')
     parser.add_argument("--fanout", type=str, default='15,10,5', help='Neighbor sampling fanout')
     # parser.add_argument("--fanout_sgc", type=str, default='0', help='SGC neighbor sampling fanout')
@@ -71,6 +71,7 @@ def main():
     # parser.add_argument('--k_hop', type=int, default=3, help='K-hop for SGC')
     parser.add_argument('--learn_eps', action="store_true", help='learn the epsilon weighting')
     parser.add_argument('--aggr_type', type=str, default="mean", choices=["sum", "mean", "max"], help='type of neighboring pooling: sum, mean or max')
+    parser.add_argument('--dgi_lam', type=float, default=1., help='coefficient of dgi loss')
 
     args = parser.parse_args()
     set_seed(args.seed)
@@ -122,10 +123,18 @@ def main():
         print('-'*50, flush=True)
         print(f'Run {i}:', flush=True)
 
+        if args.task_type in ['field_trans', 'tf_trans']:
+            if args.data_type == 'amazon':
+                data_name = 'amazon_acs'
+            elif args.data_type == 'gowalla':
+                data_name = 'gowalla_Food'
+        else:
+            data_name = args.data
+
         if args.mode == 'pretrain':
             node_features = torch.nn.Parameter(torch.from_numpy(n_feats).to(torch.float32)).to(device)
         else:
-            node_features = torch.nn.Parameter(torch.load('./results/emb_{}_{}_pretrain.pth'.format(args.data, args.task_type), map_location='cpu')).to(device)
+            node_features = torch.nn.Parameter(torch.load('./results/emb_{}_{}_pretrain.pth'.format(data_name, args.task_type), map_location='cpu')).to(device)
         
         fanout = [int(i) for i in args.fanout.split(',')]
         n_layers = len(fanout)
@@ -138,11 +147,13 @@ def main():
             model = GAT(node_features.shape[1], args.n_hidden, args.n_heads, n_layers, args.drop)
         elif args.model == 'gin':
             model = GIN(node_features.shape[1], args.n_hidden, n_layers, args.drop, args.aggr_type, args.learn_eps)
+        elif args.model == 'dgi':
+            model = DGI(node_features.shape[1], args.n_hidden, n_layers, args.drop)
         # elif args.model == 'sgc':
         #     model = SGC(node_features.shape[1], args.n_hidden, args.k_hop)
 
         if not (args.mode == 'pretrain'):
-            ckpt = torch.load('./results/model_{}_{}_{}_pretrain.pth'.format(args.model, args.data, args.task_type), map_location='cpu')
+            ckpt = torch.load('./results/model_{}_{}_{}_pretrain.pth'.format(args.model, data_name, args.task_type), map_location='cpu')
             model.load_state_dict(ckpt, strict=False)
         
         model = model.to(device)
@@ -176,12 +187,17 @@ def main():
 
                 # x = blocks[0].srcdata['feat']
                 x = node_features[input_nodes].to(device)
-                pos_score, neg_score = model(pair_graph, neg_pair_graph, blocks, x)
+                if args.model == 'dgi':
+                    pos_score, neg_score, dgi_loss = model(pair_graph, neg_pair_graph, blocks, x)
+                else:
+                    pos_score, neg_score = model(pair_graph, neg_pair_graph, blocks, x)
                 pos_label = torch.ones_like(pos_score)
                 neg_label = torch.zeros_like(neg_score)
                 score = torch.cat([pos_score, neg_score]).squeeze(-1)
                 labels = torch.cat([pos_label, neg_label]).squeeze(-1)
                 loss = F.binary_cross_entropy_with_logits(score, labels)
+                if args.model == 'dgi':
+                    loss += (args.dgi_lam * dgi_loss)
                 opt.zero_grad()
                 loss.backward()
                 opt.step()

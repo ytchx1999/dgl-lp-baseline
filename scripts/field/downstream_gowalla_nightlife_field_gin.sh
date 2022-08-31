@@ -6,7 +6,7 @@ python3 ../../train_gnn.py \
 --n_epoch 20 \
 --lr 0.001 \
 --n_runs 3 \
---gpu 1 \
+--gpu 0 \
 --model gin \
 --n_hidden 256 \
 --fanout 15,10,5 \

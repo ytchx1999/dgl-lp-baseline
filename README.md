@@ -33,7 +33,7 @@ tqdm
 
 ## Run
 
-Take **GraphSAGE** as an example, other methods (GCN, GIN, GAT) have the same operations and just replace `sage` in scripts name. 
+Take **GraphSAGE** as an example, other methods (GCN, GIN, GAT, DGI) have the same operations and just replace `sage` in scripts name. 
 
 ### Time transfer
 

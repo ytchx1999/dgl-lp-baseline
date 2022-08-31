@@ -6,11 +6,11 @@ python3 ../../train_gnn.py \
 --n_epoch 20 \
 --lr 0.001 \
 --n_runs 1 \
---gpu 1 \
+--gpu 3 \
 --model gin \
 --n_hidden 256 \
 --fanout 15,10,5 \
 --data_type gowalla \
---task_type time_trans \
+--task_type tf_trans \
 --mode pretrain \
 --seed 0

@@ -173,9 +173,6 @@ class DGIConv(nn.Module):
             nn.ReLU(),
             nn.Linear(n_hidden, 1))
 
-    def predict(self, h_src, h_dst):
-        return self.predictor(h_src * h_dst)
-
     def forward(self, blocks, x):
         h = x
         for l, (layer, block) in enumerate(zip(self.layers, blocks)):
@@ -217,6 +214,9 @@ class DGI(torch.nn.Module):
     @staticmethod
     def corruption(blocks, x):
         return blocks, x[torch.randperm(x.size(0))]
+    
+    def predict(self, h_src, h_dst):
+        return self.encoder.predictor(h_src * h_dst)
 
     def forward(self, pair_graph, neg_pair_graph, blocks, x):
         positive = self.encoder(blocks, x)
@@ -231,8 +231,8 @@ class DGI(torch.nn.Module):
 
         pos_src, pos_dst = pair_graph.edges()
         neg_src, neg_dst = neg_pair_graph.edges()
-        h_pos = self.encoder.predict(positive[pos_src], positive[pos_dst])
-        h_neg = self.encoder.predict(positive[neg_src], positive[neg_dst])
+        h_pos = self.predict(positive[pos_src], positive[pos_dst])
+        h_neg = self.predict(positive[neg_src], positive[neg_dst])
         
         return h_pos, h_neg, (l1 + l2)
     

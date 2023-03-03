@@ -22,7 +22,7 @@ from tqdm import tqdm, trange
 import os
 
 # from evaluation.evaluation import eval_edge_prediction
-from model.gnn import SAGE, GCN, GAT, GIN, DGI
+from model.gnn import SAGE, GCN, GAT, GIN, DGI, SGC
 from utils.utils import EarlyStopMonitor, RandEdgeSampler, get_neighbor_finder
 from utils.data_processing import compute_time_statistics, get_data_no_label
 
@@ -68,7 +68,7 @@ def main():
     parser.add_argument('--task_type', type=str, default="time_trans", help='Type of task')
     parser.add_argument('--mode', type=str, default="pretrain", help='pretrain or downstream')
     parser.add_argument('--seed', type=int, default=0, help='Seed for all')
-    # parser.add_argument('--k_hop', type=int, default=3, help='K-hop for SGC')
+    parser.add_argument('--k_hop', type=int, default=3, help='K-hop for SGC')
     parser.add_argument('--learn_eps', action="store_true", help='learn the epsilon weighting')
     parser.add_argument('--aggr_type', type=str, default="mean", choices=["sum", "mean", "max"], help='type of neighboring pooling: sum, mean or max')
     parser.add_argument('--dgi_lam', type=float, default=1., help='coefficient of dgi loss')
@@ -134,7 +134,8 @@ def main():
         if args.mode == 'pretrain':
             node_features = torch.nn.Parameter(torch.from_numpy(n_feats).to(torch.float32)).to(device)
         else:
-            node_features = torch.nn.Parameter(torch.load('./results/emb_{}_{}_pretrain.pth'.format(data_name, args.task_type), map_location='cpu')).to(device)
+            node_features = torch.nn.Parameter(torch.load('./results/emb_{}_{}_{}_pretrain.pth'.format(args.model, data_name, args.task_type), map_location='cpu')).to(device)
+            # './results/model_{}_{}_{}_{}.pth'.format(args.model, args.data, args.task_type, args.mode)
         
         fanout = [int(i) for i in args.fanout.split(',')]
         n_layers = len(fanout)
@@ -149,8 +150,8 @@ def main():
             model = GIN(node_features.shape[1], args.n_hidden, n_layers, args.drop, args.aggr_type, args.learn_eps)
         elif args.model == 'dgi':
             model = DGI(node_features.shape[1], args.n_hidden, n_layers, args.drop)
-        # elif args.model == 'sgc':
-        #     model = SGC(node_features.shape[1], args.n_hidden, args.k_hop)
+        elif args.model == 'sgc':
+            model = SGC(node_features.shape[1], args.n_hidden, args.k_hop)
 
         if not (args.mode == 'pretrain'):
             ckpt = torch.load('./results/model_{}_{}_{}_pretrain.pth'.format(args.model, data_name, args.task_type), map_location='cpu')
@@ -161,10 +162,10 @@ def main():
         # criterion = torch.nn.BCELoss()
 
         # fanout_sgc = [int(i) for i in args.fanout_sgc.split(',')]
-        # if args.model == 'sgc':
-        #     sampler = dgl.dataloading.NeighborSampler(fanout_sgc)
-        # else:
-        sampler = dgl.dataloading.NeighborSampler(fanout)  # , prefetch_node_feats=['feat']  [15, 10, 5]
+        if args.model == 'sgc':
+            sampler = dgl.dataloading.MultiLayerFullNeighborSampler(1) # dgl.dataloading.NeighborSampler(fanout_sgc)
+        else:
+            sampler = dgl.dataloading.NeighborSampler(fanout)  # , prefetch_node_feats=['feat']  [15, 10, 5]
         sampler = dgl.dataloading.as_edge_prediction_sampler(
                 sampler, 
                 negative_sampler=dgl.dataloading.negative_sampler.Uniform(1))  # , exclude='reverse_id', reverse_eids=reverse_eids
@@ -248,7 +249,7 @@ def main():
                         os.makedirs('./results', exist_ok=True)
                     if args.mode == 'pretrain':
                         torch.save(model.state_dict(), './results/model_{}_{}_{}_{}.pth'.format(args.model, args.data, args.task_type, args.mode))
-                        torch.save(node_features.cpu().detach(), './results/emb_{}_{}_{}.pth'.format(args.data, args.task_type, args.mode))
+                        torch.save(node_features.cpu().detach(), './results/emb_{}_{}_{}_{}.pth'.format(args.model, args.data, args.task_type, args.mode))
                 
         test_ap_list.append(best_test_result['ap'])
         test_auc_list.append(best_test_result['auc'])

@@ -1,7 +1,7 @@
 cd "$(dirname $0)"
 
 python3 ../../train_gnn.py \
--d amazon_beauty \
+-d amazon_luxury \
 --bs 512 \
 --n_epoch 20 \
 --lr 0.001 \
@@ -13,5 +13,4 @@ python3 ../../train_gnn.py \
 --data_type amazon \
 --task_type time_trans \
 --mode pretrain \
---dgi_lam 0.5 \
 --seed 0

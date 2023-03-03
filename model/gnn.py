@@ -493,8 +493,10 @@ class SGC(nn.Module):
 
     def forward(self, pair_graph, neg_pair_graph, blocks, x):
         h = x
+        src, dst = blocks[0].edges()
+        block = dgl.graph((src, dst))
         layer = self.layers[0]
-        block = dgl.add_self_loop(pair_graph)
+        block = dgl.add_self_loop(block) # 
         h = layer(block, h)
         # for l, (layer, block) in enumerate(zip(self.layers, blocks)):
         #     block = dgl.add_self_loop(block)
@@ -513,24 +515,50 @@ class SGC(nn.Module):
         # feat = g.ndata['feat']
         print('Inference...', flush=True)
         sampler = dgl.dataloading.MultiLayerFullNeighborSampler(1) # prefetch_node_feats=['feat']
+        sampler = dgl.dataloading.as_edge_prediction_sampler(
+                sampler, 
+                negative_sampler=dgl.dataloading.negative_sampler.Uniform(1))  # , exclude='reverse_id', reverse_eids=reverse_eids
         dataloader = dgl.dataloading.DataLoader(
-                g, torch.arange(g.num_nodes()).to(g.device), sampler, device=device,
-                batch_size=1000, shuffle=False, drop_last=False, num_workers=0)
+                g, torch.arange(g.num_edges()).to(g.device), sampler,
+                device=device, batch_size=10000, shuffle=False,
+                drop_last=False, num_workers=0)  #  use_uva=not args.pure_gpu
+
+        # dataloader = dgl.dataloading.DataLoader(
+        #         g, torch.arange(g.num_nodes()).to(g.device), sampler, device=device,
+        #         batch_size=10000, shuffle=False, drop_last=False, num_workers=0)
         if buffer_device is None:
             buffer_device = device
 
-        for l, layer in enumerate(self.layers):
-            # g.num_nodes()  total_nodes
-            y = torch.zeros(total_nodes, self.n_hidden, device=buffer_device) # pin_memory=args.pure_gpu
-            feat = feat.detach().clone().to(device)
+        # for l, layer in enumerate(self.layers):
+        layer = self.layers[0]
+        # g.num_nodes()  total_nodes
+        y = torch.zeros(total_nodes, self.n_hidden, device=buffer_device) # pin_memory=args.pure_gpu
+        feat = feat.detach().clone().to(device)
 
-            for input_nodes, output_nodes, blocks in tqdm.tqdm(dataloader):
-                x = feat[input_nodes]
-                h = layer(blocks[0], x)
-                if l != len(self.layers) - 1:
-                    h = F.relu(h)
-                y[output_nodes] = h.to(buffer_device)
-            feat = y
+        # for input_nodes, pair_graph, neg_pair_graph, blocks in tqdm.tqdm(dataloader):
+        #     h = feat[input_nodes]
+        #     src, dst = blocks[0].edges()
+        #     block = dgl.graph((src, dst))
+        #     layer = self.layers[0]
+        #     block = dgl.add_self_loop(block) # 
+        #     h = layer(block, h)
+        #     pos_node = pair_graph.nodes()
+        #     y[pos_node] = h[pos_node].to(buffer_device)
+
+        g = dgl.add_self_loop(g)
+        y[:g.num_nodes()] = self.layers[0](g, feat[:g.num_nodes()])
+
+        # for input_nodes, output_nodes, blocks in tqdm.tqdm(dataloader):
+        #     x = feat[input_nodes]
+        #     # x = feat[torch.cat([input_nodes, output_nodes])]
+        #     src, dst = blocks[0].edges()
+        #     block = dgl.graph((src, dst))
+        #     block = dgl.add_self_loop(block)
+        #     h = layer(block, x)
+        #     # if l != len(self.layers) - 1:
+        #     #     h = F.relu(h)
+        #     y[output_nodes] = h[:output_nodes.shape[0]].to(buffer_device)
+        feat = y
         return y
 
 
